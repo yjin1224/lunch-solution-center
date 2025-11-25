@@ -1,234 +1,504 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
+import KakaoMap, { Place } from "./components/KakaoMap";
 
-type Place = {
-  name: string;
-  category: string;
-  description: string;
-  address: string;
-  link: string;
-  mapUrl: string;
-  distanceKm: number | null;
+type SearchResponse = {
+  center: { lat: number; lng: number };
+  places: Place[];
 };
 
-export default function Home() {
-  const [locationKeyword, setLocationKeyword] = useState("");
+type PrommerPlace = {
+  name: string;
+  description: string;
+  address: string;
+  distanceText?: string;
+  note?: string;
+};
+
+// 프러머 추천 고정 리스트
+const PROMMER_RECOMMENDATIONS: PrommerPlace[] = [
+  {
+    name: "벳고동",
+    description: "칼국수 · 회덮밥 · 해물요리",
+    address: "서울 강남구 언주로172길 54",
+    distanceText: "프럼 오피스에서 도보 약 5분",
+  },
+  {
+    name: "잉크스",
+    description: "한식 덮밥 · 그릴 메뉴",
+    address: "서울 강남구 도산대로67길 19",
+    distanceText: "프럼 오피스에서 도보 약 7분",
+  },
+  {
+    name: "뉴먼두전",
+    description: "만두 · 전",
+    address: "서울 강남구 압구정로 338",
+    distanceText: "프럼 오피스에서 도보 약 5분",
+  },
+];
+
+// 로딩 메시지 후보 (마지막 …/…는 제거하고 점 애니메이션으로 대체)
+const LOADING_MESSAGES = [
+  "프러머 취향 읽는 중...",
+  "오늘 점심 분위기 분석 중…",
+  "프럼 근처 맛집 지도 펼치는 중…",
+  "프러머 기분에 맞는 한 끼 찾는 중...",
+  "맛집 후보 정렬하는 중…",
+  "지금 프럼런치봇 회의 중...",
+  "프러머가 좋아할 만한 메뉴 스캔 중…",
+  "딱 맞는 점심을 위해 데이터 섞는 중…",
+  "맛있는 곳부터 골라오는 중...",
+  "숨겨진 프럼 맛집 아카이브 여는 중…",
+];
+
+// 거리/도보 표시 포맷
+function formatDistance(distanceKm: number | null): string {
+  if (distanceKm == null) return "-";
+  const meters = distanceKm * 1000;
+  if (meters < 1000) return `${Math.round(meters)}m`;
+  return `약 ${distanceKm.toFixed(1)}km`;
+}
+
+function estimateWalkingMinutes(distanceKm: number | null): string {
+  if (distanceKm == null) return "-";
+  const meters = distanceKm * 1000;
+  const minutes = Math.max(1, Math.round(meters / 70));
+  return `${minutes}분`;
+}
+
+export default function HomePage() {
+  // 기본 위치값 "프럼"
+  const [locationKeyword, setLocationKeyword] = useState("프럼");
   const [freeText, setFreeText] = useState("");
+
   const [places, setPlaces] = useState<Place[]>([]);
-  const [visibleCount, setVisibleCount] = useState(10);
-  const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const handleSearchPlaces = async () => {
-    setError(null);
-    setPlaces([]);
-    setVisibleCount(10);
-    setHasSearched(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    if (!locationKeyword.trim()) {
-      setError("어디 근처에서 먹을지, 주소나 지역을 먼저 적어줘 😊");
-      return;
+  // idle: 처음, loading: 로딩 화면, done: 결과 화면
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "done">(
+    "idle"
+  );
+  const [activeTab, setActiveTab] = useState<"search" | "prommer">("search");
+
+  // 로딩 메시지: 본문 + 점 개수(1~3)
+  const [loadingBaseMessage, setLoadingBaseMessage] = useState("");
+  const [loadingDotCount, setLoadingDotCount] = useState(0);
+
+  const timersRef = useRef<number[]>([]);
+
+  const clearTimers = () => {
+    timersRef.current.forEach((id) => clearTimeout(id));
+    timersRef.current = [];
+  };
+
+  const handleSearch = async () => {
+    setSelectedId(null);
+    setErrorMsg(null);
+    clearTimers();
+    setSearchState("loading");
+
+    // 🔹 메시지 하나 랜덤 선택 후, 끝의 "..." 또는 "…" 제거해서 base만 사용
+    const raw =
+      LOADING_MESSAGES[
+        Math.floor(Math.random() * LOADING_MESSAGES.length)
+      ];
+    const base = raw.replace(/(\.{3}|…)\s*$/u, ""); // 끝의 ... 또는 … 제거
+    setLoadingBaseMessage(base);
+    setLoadingDotCount(0);
+
+    // 🔹 "." ".." "..." 2회 반복 애니메이션
+    const DOT_STEP_MS = 400;
+    const TOTAL_STEPS = 3 * 2; // 1,2,3 점 → 2회
+    for (let i = 0; i < TOTAL_STEPS; i++) {
+      const id = window.setTimeout(() => {
+        const count = (i % 3) + 1; // 1,2,3 반복
+        setLoadingDotCount(count);
+      }, (i + 1) * DOT_STEP_MS);
+      timersRef.current.push(id);
     }
+    const MIN_LOADING_DURATION = (TOTAL_STEPS + 1) * DOT_STEP_MS;
 
-    if (!freeText.trim()) {
-      setError("오늘 점심에 대한 생각을 자유롭게 한 줄 적어줘 😊");
-      return;
-    }
+    // 🔹 "프럼"이면 실제 주소로 치환
+    const normalizedLocation =
+      locationKeyword.trim() === "프럼"
+        ? "서울시 강남구 도산대로63길 18"
+        : locationKeyword;
 
-    setIsSearching(true);
+    const start = Date.now();
 
     try {
       const res = await fetch("/api/search-places", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          locationKeyword,
-          freeText,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ freeText, locationKeyword: normalizedLocation }),
       });
 
-      const data = await res.json();
+      const data: SearchResponse = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "맛집(장소) 검색에 실패했어요.");
+        setErrorMsg((data as any)?.error ?? "검색 중 오류가 발생했어요.");
+        setPlaces([]);
+        setCenter(null);
+      } else {
+        setPlaces(data.places);
+        setCenter(data.center);
       }
-
-      setPlaces(data.places || []);
-      setHasSearched(true);
-    } catch (e: any) {
-      console.error(e);
-      setError(e.message || "알 수 없는 오류가 발생했어요.");
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("서버와 통신 중 문제가 발생했어요.");
+      setPlaces([]);
+      setCenter(null);
     } finally {
-      setIsSearching(false);
+      const elapsed = Date.now() - start;
+      const remaining = MIN_LOADING_DURATION - elapsed;
+
+      const finish = () => {
+        clearTimers();
+        setSearchState("done");
+      };
+
+      if (remaining > 0) {
+        const id = window.setTimeout(finish, remaining);
+        timersRef.current.push(id);
+      } else {
+        finish();
+      }
     }
   };
 
-  const visiblePlaces = places.slice(0, visibleCount);
-  const hasMore = visibleCount < places.length;
+  const hasResult = places.length > 0;
+
+  const handleResetSearch = () => {
+    clearTimers();
+    setSearchState("idle");
+    setSelectedId(null);
+    setErrorMsg(null);
+    setPlaces([]);
+    setCenter(null);
+    setLocationKeyword("프럼");
+    setFreeText("");
+  };
+
+  const loadingMessageWithDots =
+    loadingBaseMessage +
+    (loadingDotCount > 0 ? ".".repeat(loadingDotCount) : "");
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto flex max-w-xl flex-col px-4 py-8">
-        {/* 헤더 */}
-        <header className="mb-6">
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-            Lunch Assistant
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">
-            오늘 점심 어디 갈까?
-          </h1>
-          <p className="mt-2 text-sm text-slate-600">
-            주소(또는 지역)와 오늘 점심에 대한 한 줄을 적으면,
-            <br />
-            근처 식당 리스트를 바로 보여줄게요.
-          </p>
-        </header>
+    <main
+      className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col gap-8 px-6 py-10 bg-white relative"
+      style={{
+        fontFamily:
+          "Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      }}
+    >
+      {/* 헤더 (로고 + 카피 + 탭) 중앙 정렬 */}
+      <header className="space-y-6 flex flex-col items-center text-center">
+        <img
+          src="/lunch_title.png"
+          alt="Lunch Solution Center"
+          className="h-50 w-auto"
+        />
 
-        {/* 입력 영역 */}
-        <section className="mb-4 space-y-3">
-          {/* 1. 주소 / 지역 */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              어디 근처에서 먹을까요? (주소 / 지역)
-            </label>
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-              placeholder="예: 서울 관악구 은천로 11-18, 역삼역, 을지로입구, 서울 강남구 등"
-              value={locationKeyword}
-              onChange={(e) => setLocationKeyword(e.target.value)}
-            />
-            <p className="mt-1 text-[11px] text-slate-400">
-              회사 주소를 정확히 적어도 되고, 지하철역 / 동 이름처럼 대략적인
-              지역만 적어도 괜찮아요.
-            </p>
-          </div>
+        <p className="text-sm leading-relaxed text-neutral-500">
+          프러머들의 점심 고민, 제가 해결해드릴게요.
+        </p>
 
-          {/* 2. 자유 텍스트 */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">
-              오늘 점심에 대해 하고 싶은 말
-            </label>
-            <textarea
-              className="h-20 w-full resize-none rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-              placeholder="예: 진짜 아무거나 말해줘, 나 결정 못 하겠어 😭"
-              value={freeText}
-              onChange={(e) => setFreeText(e.target.value)}
-            />
-          </div>
-
+        <div className="inline-flex rounded-full bg-neutral-100 p-2 text-xs text-neutral-600">
           <button
-            onClick={handleSearchPlaces}
-            disabled={isSearching}
-            className="mt-2 h-11 w-full rounded-2xl bg-slate-900 text-sm font-medium text-white disabled:opacity-60"
+            type="button"
+            onClick={() => setActiveTab("search")}
+            className={`px-4 py-1.5 rounded-full transition-all ${
+              activeTab === "search"
+                ? "bg-white text-neutral-900 border border-neutral-300"
+                : "hover:text-neutral-900"
+            }`}
           >
-            {isSearching ? "근처 식당 찾는 중…" : "오늘 점심 고르기"}
+            검색
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("prommer")}
+            className={`ml-1 px-4 py-1.5 rounded-full transition-all ${
+              activeTab === "prommer"
+                ? "bg-white text-neutral-900 border border-neutral-300"
+                : "hover:text-neutral-900"
+            }`}
+          >
+            프러머 추천
+          </button>
+        </div>
+      </header>
 
-          {error && <p className="text-xs text-red-500">{error}</p>}
-        </section>
+      {/* ───────── 검색 탭 ───────── */}
+      {activeTab === "search" && (
+        <>
+          {/* 처음: 검색 폼 */}
+          {searchState === "idle" && (
+            <section className="mt-4 space-y-4">
+              <div className="rounded-2xl bg-white p-4">
+                <div className="space-y-4">
+                  {/* 위치 입력 */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-neutral-800">
+                      어디 근처에서 먹고 싶나요?
+                    </label>
+                    <input
+                      value={locationKeyword}
+                      onChange={(e) => setLocationKeyword(e.target.value)}
+                      placeholder="프럼 / 압구정로데오역 / 강남구청역"
+                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-900 focus:ring-0"
+                    />
+                  </div>
 
-        {/* 로딩 텍스트 */}
-        {isSearching && (
-          <p className="mb-3 text-xs text-slate-500">
-            입력한 주소 기준으로 근처 식당을 탐색하는 중이에요…
-          </p>
-        )}
+                  {/* 오늘 점심에 대한 말 */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-neutral-800">
+                      뭐가 먹고 싶은가요?
+                    </label>
+                    <textarea
+                      value={freeText}
+                      onChange={(e) => setFreeText(e.target.value)}
+                      placeholder="담백한 거 먹고 싶어! / 매운 국물 땡겨 / 팀 점심 가기 좋은 식당"
+                      rows={3}
+                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-900 focus:ring-0 resize-none"
+                    />
+                  </div>
+                </div>
 
-        {/* 결과 없을 때 안내 */}
-        {!isSearching && hasSearched && places.length === 0 && !error && (
-          <p className="mt-4 text-xs text-slate-500">
-            주변에서 조건에 맞는 식당을 찾지 못했어요. 주소나 문장을 조금 바꿔볼까요?
-          </p>
-        )}
-
-        {/* 근처 장소(맛집) 리스트 */}
-        {visiblePlaces.length > 0 && (
-          <section className="mt-4">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              근처 장소
-            </h2>
-            <div className="space-y-3">
-              {visiblePlaces.map((place) => (
-                <article
-                  key={place.name + place.address}
-                  className="rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-sm"
+                <button
+                  type="button"
+                  onClick={handleSearch}
+                  className="mt-4 w-full rounded-xl bg-[#1a1a1a] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#cc0010] active:bg-[#b00010]"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-[13px] font-semibold text-slate-900">
-                        {place.name}
-                      </h3>
-                      {place.address && (
-                        <p className="mt-1 text-[11px] text-slate-600">
-                          {place.address}
-                        </p>
-                      )}
-                      {place.description && (
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          {place.description}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      {place.distanceKm !== null && (
-                        <span className="rounded-full bg-slate-900/5 px-2 py-1 text-[11px] text-slate-700">
-                          약 {place.distanceKm}km
-                        </span>
-                      )}
-                      {place.category && (
-                        <span className="text-right text-[10px] text-slate-500">
-                          {place.category}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  점심 추천 받기
+                </button>
+              </div>
+            </section>
+          )}
 
-                  <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                    <a
-                      href={place.mapUrl}
-                      target="_blank"
-                      className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700 underline-offset-2 hover:bg-slate-100"
+          {/* 결과 상태 */}
+          {searchState === "done" && (
+            <section className="mt-4 flex flex-1 flex-col gap-4 pb-10">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-neutral-500">
+                  검색 결과
+                  {hasResult && (
+                    <span className="ml-1 text-neutral-700">
+                      {places.length}곳
+                    </span>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleResetSearch}
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[11px] font-medium text-neutral-600"
+                >
+                  다시 검색하기
+                </button>
+              </div>
+
+              {errorMsg && (
+                <p className="mb-2 text-xs text-red-500">{errorMsg}</p>
+              )}
+
+              {hasResult ? (
+                <div className="space-y-4">
+                  {/* 지도: 16:9 비율 컨테이너 */}
+                  <div className="rounded-2xl bg-white p-0 overflow-hidden">
+                    <div
+                      className="relative w-full"
+                      style={{ aspectRatio: "16 / 9" }}
                     >
-                      네이버 지도에서 보기
-                    </a>
-                    {place.link && (
-                      <a
-                        href={place.link}
-                        target="_blank"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700 underline-offset-2 hover:bg-slate-100"
-                      >
-                        상세 정보 보기
-                      </a>
-                    )}
+                      <KakaoMap
+                        center={center}
+                        places={places}
+                        selectedId={selectedId}
+                        onMarkerClick={(id) => setSelectedId(id)}
+                      />
+                    </div>
                   </div>
-                </article>
-              ))}
-            </div>
 
-            {/* 더 보기 버튼 */}
-            {hasMore && (
-              <button
-                onClick={() => setVisibleCount((c) => c + 10)}
-                className="mt-4 flex h-10 w-full items-center justify-center rounded-2xl border border-slate-300 bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50"
+                  {/* 리스트 */}
+                  <div
+                    className="space-y-3 overflow-y-auto pr-1"
+                    style={{ maxHeight: "calc(100vh - 380px)" }}
+                  >
+                    {places.map((p) => {
+                      const distanceLabel = formatDistance(p.distanceKm);
+                      const walkingLabel = estimateWalkingMinutes(
+                        p.distanceKm
+                      );
+                      const isSelected = selectedId === p.id;
+
+                      const displayCategory = p.category
+                        ? p.category
+                            .split(">")
+                            .map((s) => s.trim())
+                            .filter(Boolean)
+                            .pop() ?? ""
+                        : "";
+
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setSelectedId(p.id)}
+                          className={`w-full rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${
+                            isSelected
+                              ? "border-neutral-900 bg-neutral-900 text-white"
+                              : "border-neutral-200 bg-white text-neutral-900 hover:border-neutral-400"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1 text-[15px] font-semibold tracking-[-0.01em]">
+                                <span>{p.name}</span>
+                                {displayCategory && (
+                                  <span
+                                    className={`text-[11px] font-normal ${
+                                      isSelected
+                                        ? "text-neutral-200"
+                                        : "text-neutral-500"
+                                    }`}
+                                  >
+                                    · {displayCategory}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div
+                                className={`text-xs ${
+                                  isSelected
+                                    ? "text-neutral-100/90"
+                                    : "text-neutral-500"
+                                }`}
+                              >
+                                {p.address}
+                              </div>
+
+                              <div className="mt-1 flex items-center gap-4 text-xs">
+                                <div>
+                                  📍{" "}
+                                  <span
+                                    className={
+                                      isSelected
+                                        ? "text-neutral-50"
+                                        : "text-neutral-700"
+                                    }
+                                  >
+                                    {distanceLabel}
+                                  </span>
+                                </div>
+                                <div>
+                                  🕐{" "}
+                                  <span
+                                    className={
+                                      isSelected
+                                        ? "text-neutral-50"
+                                        : "text-neutral-700"
+                                    }
+                                  >
+                                    {walkingLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <a
+                              href={p.mapUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="shrink-0"
+                            >
+                              <img
+                                src="/kakaomap_basic.png"
+                                alt="카카오맵에서 보기"
+                                className="h-10 w-10 rounded-lg"
+                              />
+                            </a>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                !errorMsg && (
+                  <p className="mt-4 text-sm leading-relaxed text-neutral-500">
+                    조건에 맞는 식당을 찾지 못했어요.{" "}
+                    <button
+                      type="button"
+                      onClick={handleResetSearch}
+                      className="font-medium text-neutral-800 underline underline-offset-2"
+                    >
+                      다시 검색해볼까?
+                    </button>
+                  </p>
+                )
+              )}
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ───────── 프러머 추천 탭 ───────── */}
+      {activeTab === "prommer" && (
+        <section className="mt-4 flex flex-1 flex-col gap-4 pb-10">
+          <div className="rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-600">
+            프럼 근처에서 자주 가거나 추천하고 싶은 곳들을 모아둔 리스트예요.
+          </div>
+
+          <div className="space-y-3">
+            {PROMMER_RECOMMENDATIONS.map((p) => (
+              <div
+                key={p.name}
+                className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-900"
               >
-                더 보기
-              </button>
-            )}
-          </section>
-        )}
+                <div className="space-y-1">
+                  <div className="text-[15px] font-semibold tracking-[-0.01em]">
+                    {p.name}
+                  </div>
+                  <div className="text-[11px] text-neutral-500">
+                    {p.description}
+                  </div>
+                  <div className="text-xs text-neutral-600">{p.address}</div>
+                  {p.distanceText && (
+                    <div className="text-[11px] text-neutral-500">
+                      {p.distanceText}
+                    </div>
+                  )}
+                  {p.note && (
+                    <div className="mt-1 text-[11px] text-neutral-600">
+                      {p.note}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-        {/* 첫 화면 안내 */}
-        {!hasSearched && !isSearching && places.length === 0 && !error && (
-          <p className="mt-4 text-xs text-slate-500">
-            아직 검색 전이에요. 주소와 한 줄을 적고 &apos;오늘 점심 고르기&apos;를
-            눌러보세요.
-          </p>
-        )}
-      </div>
+      {/* 🔹 로딩 화면: 전체 화이트 배경 + 기존 로고 + 점 점점 늘어나는 메시지 */}
+      {searchState === "loading" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white">
+          <div className="flex flex-col items-center gap-6">
+            <img
+              src="/lunch_title.png"
+              alt="Lunch Solution Center"
+              className="h-40 w-auto"
+            />
+            <p className="text-sm text-neutral-700">{loadingMessageWithDots}</p>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
