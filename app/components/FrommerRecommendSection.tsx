@@ -183,8 +183,23 @@ export default function FrommerRecommendSection() {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (!name.trim() || !address.trim() || !reason.trim()) {
+    const trimmedName = name.trim();
+    const trimmedAddress = address.trim();
+    const trimmedReason = reason.trim();
+
+    if (!trimmedName || !trimmedAddress || !trimmedReason) {
       setErrorMsg("식당 이름, 주소, 추천 이유를 모두 입력해주세요.");
+      return;
+    }
+
+    // 🔴 프론트 단 중복 이름 체크
+    const hasDuplicate = recommendations.some(
+      (r) => r.name.trim() === trimmedName
+    );
+    if (hasDuplicate) {
+      setErrorMsg(
+        "이미 같은 이름의 식당이 있어요. 지점명을 함께 적어서 구분해볼까요?"
+      );
       return;
     }
 
@@ -195,18 +210,28 @@ export default function FrommerRecommendSection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name,
-          address,
-          reason,
+          name: trimmedName,
+          address: trimmedAddress,
+          reason: trimmedReason,
           kakaoUrl: kakaoUrl || null,
           categories: selectedCategories,
         }),
       });
 
-      const data: DbRecommendation = await res.json();
-      if (!res.ok) throw new Error(data as any);
+      const data = await res.json();
 
-      setRecommendations((prev) => [data, ...prev]);
+      if (!res.ok) {
+        const msg =
+          (data as any)?.message ||
+          (res.status === 409
+            ? "이미 같은 이름의 식당이 등록되어 있어요."
+            : "추천을 저장하지 못했어요.");
+        throw new Error(msg);
+      }
+
+      const created = data as DbRecommendation;
+
+      setRecommendations((prev) => [created, ...prev]);
 
       setName("");
       setAddress("");
@@ -258,7 +283,6 @@ export default function FrommerRecommendSection() {
         setLikedIds(prevLiked);
         setRecommendations(prevRecs);
       } else {
-        // 서버에서 최신 값 받아서 덮어쓰기
         const updated: DbRecommendation = await res.json();
         setRecommendations((prev) =>
           prev.map((r) => (r.id === updated.id ? updated : r))
@@ -292,7 +316,6 @@ export default function FrommerRecommendSection() {
     if (sortBy === "likes") {
       return (b.likes ?? 0) - (a.likes ?? 0);
     }
-    // 최신순: created_at 기준 내림차순
     return (
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
