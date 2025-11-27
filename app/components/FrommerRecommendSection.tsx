@@ -18,6 +18,7 @@ type DbRecommendation = {
 
 // 태그: 팀회식 / 커피챗 제외
 const CATEGORY_OPTIONS = ["음식점", "카페", "프럼다이닝"];
+const LIKED_STORAGE_KEY = "lsc-liked-recommendations";
 
 export default function FrommerRecommendSection() {
   const [recommendations, setRecommendations] = useState<DbRecommendation[]>([]);
@@ -37,11 +38,14 @@ export default function FrommerRecommendSection() {
   const [kakaoReady, setKakaoReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // 태그 필터(지도 + 리스트 공통)
+  // 태그 필터
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
-  // 정렬 기준 (리스트용)
+  // 정렬 기준
   const [sortBy, setSortBy] = useState<"latest" | "likes">("latest");
+
+  // 좋아요 선택 상태 (localStorage)
+  const [likedIds, setLikedIds] = useState<number[]>([]);
 
   const DEFAULT_CENTER = { lat: 37.525, lng: 127.03 };
 
@@ -87,7 +91,35 @@ export default function FrommerRecommendSection() {
     fetchData();
   }, []);
 
-  // 주소 → 좌표 변환 (전체 리스트 기준으로 한 번만 계산)
+  // 좋아요 상태 불러오기 (localStorage)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(LIKED_STORAGE_KEY);
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        setLikedIds(arr);
+      }
+    } catch (e) {
+      console.error("failed to load liked ids", e);
+    }
+  }, []);
+
+  // likedIds 변경 시 localStorage 반영
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        LIKED_STORAGE_KEY,
+        JSON.stringify(likedIds)
+      );
+    } catch (e) {
+      console.error("failed to save liked ids", e);
+    }
+  }, [likedIds]);
+
+  // 주소 → 좌표 변환
   useEffect(() => {
     if (!kakaoReady) return;
 
@@ -190,33 +222,56 @@ export default function FrommerRecommendSection() {
     }
   };
 
-  // 좋아요 처리: isLike true → +1, false → -1 (백엔드에서 처리)
-  const handleLike = async (id: number, isLike: boolean) => {
+  // 좋아요 처리 (토글)
+  const handleLike = async (id: number, nextIsLiked: boolean) => {
+    const prevLiked = likedIds;
+    const prevRecs = recommendations;
+
+    // 낙관적 업데이트
+    setLikedIds((prev) =>
+      nextIsLiked ? [...prev, id] : prev.filter((x) => x !== id)
+    );
+    setRecommendations((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              likes: Math.max(
+                0,
+                (r.likes ?? 0) + (nextIsLiked ? 1 : -1)
+              ),
+            }
+          : r
+      )
+    );
+
     try {
       const res = await fetch("/api/frommer-recommendations/like", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, isLike }),
+        body: JSON.stringify({ id, isLike: nextIsLiked }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        console.error("like failed:", data);
-        return;
+        console.error("like failed");
+        // 롤백
+        setLikedIds(prevLiked);
+        setRecommendations(prevRecs);
+      } else {
+        // 서버에서 최신 값 받아서 덮어쓰기
+        const updated: DbRecommendation = await res.json();
+        setRecommendations((prev) =>
+          prev.map((r) => (r.id === updated.id ? updated : r))
+        );
       }
-
-      const updated: DbRecommendation = data;
-
-      setRecommendations((prev) =>
-        prev.map((r) => (r.id === updated.id ? updated : r))
-      );
     } catch (e) {
       console.error("like error:", e);
+      setLikedIds(prevLiked);
+      setRecommendations(prevRecs);
     }
   };
 
-  // ------- 필터링 된 데이터 (지도 + 리스트 공통 사용) -------
+  // ------- 필터링 / 정렬 -------
   const hasFilter = !!activeFilter;
 
   const filteredRecommendations = hasFilter
@@ -233,10 +288,9 @@ export default function FrommerRecommendSection() {
       })
     : mapPlaces;
 
-  // ------- 정렬 로직 (리스트용) -------
   const sortedRecommendations = [...filteredRecommendations].sort((a, b) => {
     if (sortBy === "likes") {
-      return (b.likes ?? 0) - (a.likes ?? 0); // 좋아요 많은 순
+      return (b.likes ?? 0) - (a.likes ?? 0);
     }
     // 최신순: created_at 기준 내림차순
     return (
@@ -259,11 +313,10 @@ export default function FrommerRecommendSection() {
             <br />
             맛있는 곳이 생각나면 언제든 추가해주세요!
           </p>
-          {/* 카드 우측 하단 정렬 (모바일 포함) */}
           <button
             type="button"
             onClick={() => setIsFormOpen((v) => !v)}
-            className="self-end rounded-full border border-neutral-900 bg-white px-3 py-1.5 text-[11px] font-semibold text-neutral-900 hover:bg-neutral-900 hover:text-white transition"
+            className="rounded-full border border-neutral-900 bg-white px-3 py-1.5 text-[11px] font-semibold text-neutral-900 hover:bg-neutral-900 hover:text-white transition self-end sm:self-center"
           >
             식당 추천하기
           </button>
@@ -375,7 +428,7 @@ export default function FrommerRecommendSection() {
 
       {/* 태그 필터 + 정렬 */}
       <div className="mt-1 flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
-        {/* 태그: 모바일/데스크탑 모두 위쪽 줄 */}
+        {/* 태그 */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">
           <button
             type="button"
@@ -409,7 +462,7 @@ export default function FrommerRecommendSection() {
           })}
         </div>
 
-        {/* 정렬 드롭다운: 모바일에선 태그 아래 줄, 왼쪽 정렬 */}
+        {/* 정렬 드롭다운 */}
         <div className="flex justify-start sm:justify-end">
           <div className="relative inline-flex">
             <select
@@ -461,6 +514,7 @@ export default function FrommerRecommendSection() {
             const idStr = String(r.id);
             const place = filteredMapPlaces.find((p) => p.id === idStr);
             const mapUrl = r.kakao_url || place?.mapUrl;
+            const isLiked = likedIds.includes(r.id);
 
             return (
               <PrommerCard
@@ -473,8 +527,9 @@ export default function FrommerRecommendSection() {
                 categories={r.categories || []}
                 likes={r.likes ?? 0}
                 isSelected={selectedId === idStr}
+                isLiked={isLiked}
                 onClick={() => setSelectedId(idStr)}
-                onLike={(isLike) => handleLike(r.id, isLike)}
+                onToggleLike={(next) => handleLike(r.id, next)}
               />
             );
           })
@@ -493,12 +548,12 @@ type PrommerCardProps = {
   categories: string[];
   likes: number;
   isSelected?: boolean;
+  isLiked: boolean;
   onClick?: () => void;
-  onLike?: (isLike: boolean) => void;
+  onToggleLike?: (nextIsLiked: boolean) => void;
 };
 
 function PrommerCard({
-  id,
   name,
   address,
   kakaoUrl,
@@ -506,17 +561,10 @@ function PrommerCard({
   categories,
   likes,
   isSelected,
+  isLiked,
   onClick,
-  onLike,
+  onToggleLike,
 }: PrommerCardProps) {
-  // 👍 좋아요 토글 상태 관리 (localStorage 기반)
-  const [alreadyLiked, setAlreadyLiked] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(`liked_${id}`);
-    if (saved === "true") setAlreadyLiked(true);
-  }, [id]);
-
   return (
     <div
       role="button"
@@ -587,26 +635,21 @@ function PrommerCard({
               </span>
             </div>
           ) : (
-            <div /> // 이유 없을 때도 정렬 유지
+            <div />
           )}
 
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              const key = `liked_${id}`;
-              const newState = !alreadyLiked;
-
-              localStorage.setItem(key, newState ? "true" : "false");
-              setAlreadyLiked(newState);
-              onLike?.(newState);
+              onToggleLike?.(!isLiked);
             }}
             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] border transition
               ${
-                alreadyLiked
+                isLiked
                   ? isSelected
                     ? "bg-white/10 text-neutral-50 border-neutral-300"
-                    : "bg-neutral-200 text-neutral-800 border-neutral-200"
+                    : "bg-neutral-100 text-neutral-800 border-neutral-200"
                   : isSelected
                   ? "border-neutral-400 text-neutral-50"
                   : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"

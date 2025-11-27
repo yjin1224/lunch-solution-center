@@ -9,7 +9,7 @@ type SearchResponse = {
   places: Place[];
 };
 
-// 로딩 메시지 후보 (마지막 …/…는 제거하고 점 애니메이션으로 대체)
+// 로딩 메시지 후보
 const LOADING_MESSAGES = [
   "프러머 취향 읽는 중...",
   "오늘 점심 분위기 분석 중…",
@@ -23,7 +23,7 @@ const LOADING_MESSAGES = [
   "숨겨진 프럼 맛집 아카이브 여는 중…",
 ];
 
-// 거리/도보 표시 포맷
+// 거리/도보 계산
 export function formatDistance(distanceKm: number | null): string {
   if (distanceKm == null) return "-";
   const meters = distanceKm * 1000;
@@ -39,61 +39,65 @@ export function estimateWalkingMinutes(distanceKm: number | null): string {
 }
 
 export default function HomePage() {
-  // 기본 위치값 "프럼"
+  // 검색 관련 상태
   const [locationKeyword, setLocationKeyword] = useState("프럼");
   const [freeText, setFreeText] = useState("");
 
   const [places, setPlaces] = useState<Place[]>([]);
-  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
-    null
-  );
+  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // idle: 처음, loading: 로딩 화면, done: 결과 화면
-  const [searchState, setSearchState] = useState<"idle" | "loading" | "done">(
-    "idle"
-  );
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "done">("idle");
   const [activeTab, setActiveTab] = useState<"search" | "prommer">("search");
 
-  // 로딩 메시지: 본문 + 점 개수(1~3)
   const [loadingBaseMessage, setLoadingBaseMessage] = useState("");
   const [loadingDotCount, setLoadingDotCount] = useState(0);
-
   const timersRef = useRef<number[]>([]);
+
+  /* -------------------------------
+      🔥 초기 상태로 전체 리셋 함수
+  -------------------------------- */
+  const resetToInitialState = () => {
+    setActiveTab("search");
+    setSearchState("idle");
+    setSelectedId(null);
+    setErrorMsg(null);
+    setPlaces([]);
+    setCenter(null);
+    setLocationKeyword("프럼");
+    setFreeText("");
+  };
 
   const clearTimers = () => {
     timersRef.current.forEach((id) => clearTimeout(id));
     timersRef.current = [];
   };
 
+  /* -------------------------------
+      🔍 검색 처리
+  -------------------------------- */
   const handleSearch = async () => {
     setSelectedId(null);
     setErrorMsg(null);
     clearTimers();
     setSearchState("loading");
 
-    // 🔹 메시지 하나 랜덤 선택 후, 끝의 "..." 또는 "…" 제거해서 base만 사용
-    const raw =
-      LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
-    const base = raw.replace(/(\.{3}|…)\s*$/u, ""); // 끝의 ... 또는 … 제거
+    const raw = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
+    const base = raw.replace(/(\.{3}|…)\s*$/u, "");
     setLoadingBaseMessage(base);
     setLoadingDotCount(0);
 
-    // 🔹 "." ".." "..." 2회 반복 애니메이션
     const DOT_STEP_MS = 400;
-    const TOTAL_STEPS = 3 * 2; // 1,2,3 점 → 2회
+    const TOTAL_STEPS = 6; // 1,2,3 x 2회
     for (let i = 0; i < TOTAL_STEPS; i++) {
       const id = window.setTimeout(() => {
-        const count = (i % 3) + 1; // 1,2,3 반복
-        setLoadingDotCount(count);
+        setLoadingDotCount((i % 3) + 1);
       }, (i + 1) * DOT_STEP_MS);
       timersRef.current.push(id);
     }
     const MIN_LOADING_DURATION = (TOTAL_STEPS + 1) * DOT_STEP_MS;
 
-    // 🔹 "프럼"이면 실제 주소로 치환
     const normalizedLocation =
       locationKeyword.trim() === "프럼"
         ? "서울시 강남구 도산대로63길 18"
@@ -105,7 +109,10 @@ export default function HomePage() {
       const res = await fetch("/api/search-places", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ freeText, locationKeyword: normalizedLocation }),
+        body: JSON.stringify({
+          freeText,
+          locationKeyword: normalizedLocation,
+        }),
       });
 
       const data: SearchResponse = await res.json();
@@ -119,21 +126,20 @@ export default function HomePage() {
         setCenter(data.center);
       }
     } catch (err) {
-      console.error(err);
       setErrorMsg("서버와 통신 중 문제가 발생했어요.");
       setPlaces([]);
       setCenter(null);
     } finally {
       const elapsed = Date.now() - start;
-      const remaining = MIN_LOADING_DURATION - elapsed;
+      const remain = MIN_LOADING_DURATION - elapsed;
 
       const finish = () => {
         clearTimers();
         setSearchState("done");
       };
 
-      if (remaining > 0) {
-        const id = window.setTimeout(finish, remaining);
+      if (remain > 0) {
+        const id = window.setTimeout(finish, remain);
         timersRef.current.push(id);
       } else {
         finish();
@@ -143,20 +149,15 @@ export default function HomePage() {
 
   const hasResult = places.length > 0;
 
+  /* -------------------------------
+      🔄 검색 초기화
+  -------------------------------- */
   const handleResetSearch = () => {
-    clearTimers();
-    setSearchState("idle");
-    setSelectedId(null);
-    setErrorMsg(null);
-    setPlaces([]);
-    setCenter(null);
-    setLocationKeyword("프럼");
-    setFreeText("");
+    resetToInitialState();
   };
 
   const loadingMessageWithDots =
-    loadingBaseMessage +
-    (loadingDotCount > 0 ? ".".repeat(loadingDotCount) : "");
+    loadingBaseMessage + (loadingDotCount > 0 ? ".".repeat(loadingDotCount) : "");
 
   return (
     <main
@@ -166,13 +167,17 @@ export default function HomePage() {
           "Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
       }}
     >
-      {/* 헤더 (로고 + 카피 + 탭) 중앙 정렬 */}
+      {/* ------------------ Header ------------------ */}
       <header className="space-y-6 flex flex-col items-center text-center">
-        <img
-          src="/lunch_title.png"
-          alt="Lunch Solution Center"
-          className="h-50 w-auto"
-        />
+
+        {/* 🔥 로고 클릭 → 초기화 */}
+        <button onClick={resetToInitialState} className="block cursor-pointer">
+          <img
+            src="/lunch_title.png"
+            alt="Lunch Solution Center"
+            className="h-50 w-auto"
+          />
+        </button>
 
         <p className="text-sm leading-relaxed text-neutral-500">
           프러머들의 점심 고민, 제가 해결해드릴게요.
@@ -190,6 +195,7 @@ export default function HomePage() {
           >
             검색
           </button>
+
           <button
             type="button"
             onClick={() => setActiveTab("prommer")}
@@ -204,30 +210,30 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ───────── 검색 탭 ───────── */}
+      {/* ------------------ 검색 탭 ------------------ */}
       {activeTab === "search" && (
         <>
-          {/* 처음: 검색 폼 */}
           {searchState === "idle" && (
             <section className="mt-4 space-y-4">
               <div className="rounded-2xl bg-white p-4">
                 <div className="space-y-4">
-                  {/* 위치 입력 */}
-                  <div className="space-y-0">
-                    <label className="block mb-2 text-xs font-medium text-neutral-800">
+                  
+                  {/* 위치 */}
+                  <div>
+                    <label className="block mb-2 text-xs text-neutral-800">
                       어디 근처에서 먹고 싶나요?
                     </label>
                     <input
                       value={locationKeyword}
                       onChange={(e) => setLocationKeyword(e.target.value)}
                       placeholder="프럼 / 압구정로데오역 / 강남구청역"
-                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-900 focus:ring-0"
+                      className="w-full rounded-xl border border-neutral-300 px-3 py-2.5 text-sm"
                     />
                   </div>
 
-                  {/* 오늘 점심에 대한 말 */}
-                  <div className="space-y-0">
-                    <label className="block mb-2 text-xs font-medium text-neutral-800">
+                  {/* 메뉴/기분 */}
+                  <div>
+                    <label className="block mb-2 text-xs text-neutral-800">
                       뭐가 먹고 싶은가요?
                     </label>
                     <textarea
@@ -235,15 +241,16 @@ export default function HomePage() {
                       onChange={(e) => setFreeText(e.target.value)}
                       placeholder="담백한 거 먹고 싶어! / 매운 국물 땡겨 / 팀 점심 가기 좋은 식당"
                       rows={3}
-                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-neutral-900 focus:ring-0 resize-none"
+                      className="w-full rounded-xl border border-neutral-300 px-3 py-2.5 text-sm resize-none"
                     />
                   </div>
+
                 </div>
 
                 <button
                   type="button"
                   onClick={handleSearch}
-                  className="mt-4 w-full rounded-xl bg-[#1a1a1a] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#cc0010] active:bg-[#b00010]"
+                  className="mt-4 w-full rounded-xl bg-[#1a1a1a] px-4 py-3 text-sm font-semibold text-white hover:bg-[#cc0010]"
                 >
                   점심 추천 받기
                 </button>
@@ -251,39 +258,33 @@ export default function HomePage() {
             </section>
           )}
 
-          {/* 결과 상태 */}
+          {/* ------------------ 검색 완료 화면 ------------------ */}
           {searchState === "done" && (
             <section className="mt-4 flex flex-1 flex-col gap-4 pb-10">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-neutral-500">
                   검색 결과
                   {hasResult && (
-                    <span className="ml-1 text-neutral-700">
-                      {places.length}곳
-                    </span>
+                    <span className="ml-1 text-neutral-700">{places.length}곳</span>
                   )}
                 </p>
                 <button
                   type="button"
                   onClick={handleResetSearch}
-                  className="rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[11px] font-medium text-neutral-600"
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[11px]"
                 >
                   다시 검색하기
                 </button>
               </div>
 
               {errorMsg && (
-                <p className="mb-2 text-xs text-red-500">{errorMsg}</p>
+                <p className="text-xs text-red-500 mb-2">{errorMsg}</p>
               )}
 
               {hasResult ? (
-                <div className="space-y-4">
-                  {/* 지도: 16:9 비율 컨테이너 */}
-                  <div className="rounded-2xl bg-white p-0 overflow-hidden">
-                    <div
-                      className="relative w-full"
-                      style={{ aspectRatio: "16 / 9" }}
-                    >
+                <>
+                  <div className="rounded-2xl bg-white overflow-hidden">
+                    <div className="relative w-full" style={{ aspectRatio: "16 / 9" }}>
                       <KakaoMap
                         center={center}
                         places={places}
@@ -293,24 +294,18 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* 리스트 */}
+                  {/* 리스트 스크롤 영역 */}
                   <div
                     className="space-y-3 overflow-y-auto pr-1"
                     style={{ maxHeight: "calc(100vh - 380px)" }}
                   >
                     {places.map((p) => {
                       const distanceLabel = formatDistance(p.distanceKm);
-                      const walkingLabel = estimateWalkingMinutes(
-                        p.distanceKm
-                      );
+                      const walkingLabel = estimateWalkingMinutes(p.distanceKm);
                       const isSelected = selectedId === p.id;
 
                       const displayCategory = p.category
-                        ? p.category
-                            .split(">")
-                            .map((s) => s.trim())
-                            .filter(Boolean)
-                            .pop() ?? ""
+                        ? p.category.split(">").map((s) => s.trim()).pop() ?? ""
                         : "";
 
                       return (
@@ -322,20 +317,18 @@ export default function HomePage() {
                           walkingLabel={walkingLabel}
                           categoryLabel={displayCategory}
                           onSelect={() => setSelectedId(p.id)}
-                          showReason={false}
                         />
                       );
                     })}
                   </div>
-                </div>
+                </>
               ) : (
                 !errorMsg && (
-                  <p className="mt-4 text-sm leading-relaxed text-neutral-500">
+                  <p className="mt-4 text-sm text-neutral-500">
                     조건에 맞는 식당을 찾지 못했어요.{" "}
                     <button
-                      type="button"
+                      className="underline text-neutral-800"
                       onClick={handleResetSearch}
-                      className="font-medium text-neutral-800 underline underline-offset-2"
                     >
                       다시 검색해볼까?
                     </button>
@@ -347,18 +340,14 @@ export default function HomePage() {
         </>
       )}
 
-      {/* ───────── 프러머 추천 탭 ───────── */}
+      {/* ------------------ 프러머 추천 탭 ------------------ */}
       {activeTab === "prommer" && <FrommerRecommendSection />}
 
-      {/* 🔹 로딩 화면: 전체 화이트 배경 + 기존 로고 + 점 점점 늘어나는 메시지 */}
+      {/* ------------------ 로딩 화면 ------------------ */}
       {searchState === "loading" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white">
           <div className="flex flex-col items-center gap-6">
-            <img
-              src="/lunch_title.png"
-              alt="Lunch Solution Center"
-              className="h-40 w-auto"
-            />
+            <img src="/lunch_title.png" alt="Lunch Solution Center" className="h-40 w-auto" />
             <p className="text-sm text-neutral-700">{loadingMessageWithDots}</p>
           </div>
         </div>
@@ -367,9 +356,9 @@ export default function HomePage() {
   );
 }
 
-/**
- * ✅ 검색 결과 카드용 컴포넌트
- */
+/* -----------------------------
+   식당 카드 컴포넌트
+------------------------------ */
 type RestaurantCardProps = {
   place: Place;
   isSelected?: boolean;
@@ -377,8 +366,6 @@ type RestaurantCardProps = {
   walkingLabel: string;
   categoryLabel?: string;
   onSelect?: () => void;
-  showReason?: boolean;
-  reasonText?: string | null;
 };
 
 export function RestaurantCard({
@@ -388,13 +375,11 @@ export function RestaurantCard({
   walkingLabel,
   categoryLabel,
   onSelect,
-  showReason = false,
-  reasonText,
 }: RestaurantCardProps) {
   return (
     <button
-      type="button"
       onClick={onSelect}
+      type="button"
       className={`w-full rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${
         isSelected
           ? "border-neutral-900 bg-neutral-900 text-white"
@@ -403,63 +388,27 @@ export function RestaurantCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-1 text-[15px] font-semibold tracking-[-0.01em]">
+          <div className="flex items-center gap-1 text-[15px] font-semibold">
             <span>{place.name}</span>
             {categoryLabel && (
-              <span
-                className={`text-[11px] font-normal ${
-                  isSelected ? "text-neutral-200" : "text-neutral-500"
-                }`}
-              >
+              <span className={`text-[11px] ${isSelected ? "text-neutral-200" : "text-neutral-500"}`}>
                 · {categoryLabel}
               </span>
             )}
           </div>
 
-          <div
-            className={`text-xs ${
-              isSelected ? "text-neutral-100/90" : "text-neutral-500"
-            }`}
-          >
+          <div className={`text-xs ${isSelected ? "text-neutral-100" : "text-neutral-500"}`}>
             {place.address}
           </div>
 
           <div className="mt-1 flex items-center gap-4 text-xs">
             <div>
-              📍{" "}
-              <span
-                className={
-                  isSelected ? "text-neutral-50" : "text-neutral-700"
-                }
-              >
-                {distanceLabel}
-              </span>
+              📍 <span className={isSelected ? "text-neutral-50" : "text-neutral-700"}>{distanceLabel}</span>
             </div>
             <div>
-              🕐{" "}
-              <span
-                className={
-                  isSelected ? "text-neutral-50" : "text-neutral-700"
-                }
-              >
-                {walkingLabel}
-              </span>
+              🕐 <span className={isSelected ? "text-neutral-50" : "text-neutral-700"}>{walkingLabel}</span>
             </div>
           </div>
-
-          {/* (현재는 검색 탭에서 showReason=false 로만 사용 중) */}
-          {showReason && reasonText && (
-            <div className="mt-2 text-xs">
-              <span
-                className={
-                  isSelected ? "text-neutral-50" : "text-neutral-700"
-                }
-              >
-                <span className="font-medium">프러머 추천 이유</span>{" "}
-                <span>“{reasonText}”</span>
-              </span>
-            </div>
-          )}
         </div>
 
         <a
@@ -469,11 +418,7 @@ export function RestaurantCard({
           onClick={(e) => e.stopPropagation()}
           className="shrink-0"
         >
-          <img
-            src="/kakaomap_basic.png"
-            alt="카카오맵에서 보기"
-            className="h-8 w-8 rounded-lg"
-          />
+          <img src="/kakaomap_basic.png" className="h-8 w-8 rounded-lg" />
         </a>
       </div>
     </button>
