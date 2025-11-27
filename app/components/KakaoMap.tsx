@@ -40,7 +40,7 @@ export type Place = {
   name: string;
   address: string;
   category: string;
-  link: string;
+  link?: string;
   mapUrl: string;
   distanceKm: number | null;
   lat: number;
@@ -84,7 +84,8 @@ export default function KakaoMap({
     }
 
     const script = document.createElement("script");
-    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&autoload=false`;
+    // services 라이브러리 포함
+    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&autoload=false&libraries=services`;
     script.async = true;
 
     script.onload = () => {
@@ -104,11 +105,11 @@ export default function KakaoMap({
     document.head.appendChild(script);
 
     return () => {
-      document.head.removeChild(script);
+      // 다른 페이지에서 쓰일 수 있으니 스크립트는 제거하지 않음
     };
   }, []);
 
-  // 2) 지도/마커 생성
+  // 2) 지도/마커 생성 및 중심 이동
   useEffect(() => {
     if (!kakaoLoaded) return;
     if (!center) return;
@@ -123,13 +124,13 @@ export default function KakaoMap({
         level: 4,
       });
     } else {
-      mapRef.current.setCenter(
-        new kakao.maps.LatLng(center.lat, center.lng)
-      );
+      // 🔽 기존 setCenter → panTo 로 변경해서 부드럽게 이동
+      const target = new kakao.maps.LatLng(center.lat, center.lng);
+      mapRef.current.panTo(target);
     }
 
     // 기존 마커 제거
-    Object.values(markersRef.current).forEach((m) => m.setMap(null));
+    Object.values(markersRef.current).forEach((m: any) => m.setMap(null));
     markersRef.current = {};
 
     const defaultImage = createMarkerImage(kakao, false);
@@ -153,7 +154,7 @@ export default function KakaoMap({
     });
   }, [kakaoLoaded, center, places, onMarkerClick]);
 
-  // 3) 선택된 식당 강조
+  // 3) 선택된 식당 강조 + 선택된 위치로 부드럽게 이동
   useEffect(() => {
     if (!kakaoLoaded || !selectedId) return;
     const kakao = window.kakao;
@@ -161,12 +162,14 @@ export default function KakaoMap({
     if (!marker || !mapRef.current) return;
 
     const position = marker.getPosition();
+
+    // 이미 panTo 사용 중 → 선택 변경 시에도 항상 부드럽게 이동
     mapRef.current.panTo(position);
 
     const defaultImage = createMarkerImage(kakao, false);
     const selectedImage = createMarkerImage(kakao, true);
 
-    Object.values(markersRef.current).forEach((m) =>
+    Object.values(markersRef.current).forEach((m: any) =>
       m.setImage(defaultImage)
     );
     marker.setImage(selectedImage);
@@ -185,7 +188,7 @@ export default function KakaoMap({
           alignItems: "center",
           justifyContent: "center",
           fontSize: 12,
-          aspectRatio: "7 / 5",
+          aspectRatio: "16 / 9",
         }}
       >
         {loadError}
@@ -205,7 +208,7 @@ export default function KakaoMap({
           alignItems: "center",
           justifyContent: "center",
           fontSize: 12,
-          aspectRatio: "7 / 5",
+          aspectRatio: "16 / 9",
         }}
       >
         지도를 불러오는 중이에요…
@@ -220,7 +223,7 @@ export default function KakaoMap({
         width: "100%",
         borderRadius: 16,
         overflow: "hidden",
-        aspectRatio: "7 / 5",
+        aspectRatio: "16 / 9",
       }}
     />
   );

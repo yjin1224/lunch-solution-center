@@ -2,41 +2,12 @@
 
 import { useState, useRef } from "react";
 import KakaoMap, { Place } from "./components/KakaoMap";
+import FrommerRecommendSection from "./components/FrommerRecommendSection";
 
 type SearchResponse = {
   center: { lat: number; lng: number };
   places: Place[];
 };
-
-type PrommerPlace = {
-  name: string;
-  description: string;
-  address: string;
-  distanceText?: string;
-  note?: string;
-};
-
-// 프러머 추천 고정 리스트
-const PROMMER_RECOMMENDATIONS: PrommerPlace[] = [
-  {
-    name: "벳고동",
-    description: "칼국수 · 회덮밥 · 해물요리",
-    address: "서울 강남구 언주로172길 54",
-    distanceText: "프럼 오피스에서 도보 약 5분",
-  },
-  {
-    name: "잉크스",
-    description: "한식 덮밥 · 그릴 메뉴",
-    address: "서울 강남구 도산대로67길 19",
-    distanceText: "프럼 오피스에서 도보 약 7분",
-  },
-  {
-    name: "뉴먼두전",
-    description: "만두 · 전",
-    address: "서울 강남구 압구정로 338",
-    distanceText: "프럼 오피스에서 도보 약 5분",
-  },
-];
 
 // 로딩 메시지 후보 (마지막 …/…는 제거하고 점 애니메이션으로 대체)
 const LOADING_MESSAGES = [
@@ -53,14 +24,14 @@ const LOADING_MESSAGES = [
 ];
 
 // 거리/도보 표시 포맷
-function formatDistance(distanceKm: number | null): string {
+export function formatDistance(distanceKm: number | null): string {
   if (distanceKm == null) return "-";
   const meters = distanceKm * 1000;
   if (meters < 1000) return `${Math.round(meters)}m`;
   return `약 ${distanceKm.toFixed(1)}km`;
 }
 
-function estimateWalkingMinutes(distanceKm: number | null): string {
+export function estimateWalkingMinutes(distanceKm: number | null): string {
   if (distanceKm == null) return "-";
   const meters = distanceKm * 1000;
   const minutes = Math.max(1, Math.round(meters / 70));
@@ -105,9 +76,7 @@ export default function HomePage() {
 
     // 🔹 메시지 하나 랜덤 선택 후, 끝의 "..." 또는 "…" 제거해서 base만 사용
     const raw =
-      LOADING_MESSAGES[
-        Math.floor(Math.random() * LOADING_MESSAGES.length)
-      ];
+      LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
     const base = raw.replace(/(\.{3}|…)\s*$/u, ""); // 끝의 ... 또는 … 제거
     setLoadingBaseMessage(base);
     setLoadingDotCount(0);
@@ -244,8 +213,8 @@ export default function HomePage() {
               <div className="rounded-2xl bg-white p-4">
                 <div className="space-y-4">
                   {/* 위치 입력 */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-neutral-800">
+                  <div className="space-y-0">
+                    <label className="block mb-2 text-xs font-medium text-neutral-800">
                       어디 근처에서 먹고 싶나요?
                     </label>
                     <input
@@ -257,8 +226,8 @@ export default function HomePage() {
                   </div>
 
                   {/* 오늘 점심에 대한 말 */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-neutral-800">
+                  <div className="space-y-0">
+                    <label className="block mb-2 text-xs font-medium text-neutral-800">
                       뭐가 먹고 싶은가요?
                     </label>
                     <textarea
@@ -345,86 +314,16 @@ export default function HomePage() {
                         : "";
 
                       return (
-                        <button
+                        <RestaurantCard
                           key={p.id}
-                          type="button"
-                          onClick={() => setSelectedId(p.id)}
-                          className={`w-full rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${
-                            isSelected
-                              ? "border-neutral-900 bg-neutral-900 text-white"
-                              : "border-neutral-200 bg-white text-neutral-900 hover:border-neutral-400"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap items-center gap-1 text-[15px] font-semibold tracking-[-0.01em]">
-                                <span>{p.name}</span>
-                                {displayCategory && (
-                                  <span
-                                    className={`text-[11px] font-normal ${
-                                      isSelected
-                                        ? "text-neutral-200"
-                                        : "text-neutral-500"
-                                    }`}
-                                  >
-                                    · {displayCategory}
-                                  </span>
-                                )}
-                              </div>
-
-                              <div
-                                className={`text-xs ${
-                                  isSelected
-                                    ? "text-neutral-100/90"
-                                    : "text-neutral-500"
-                                }`}
-                              >
-                                {p.address}
-                              </div>
-
-                              <div className="mt-1 flex items-center gap-4 text-xs">
-                                <div>
-                                  📍{" "}
-                                  <span
-                                    className={
-                                      isSelected
-                                        ? "text-neutral-50"
-                                        : "text-neutral-700"
-                                    }
-                                  >
-                                    {distanceLabel}
-                                  </span>
-                                </div>
-                                <div>
-                                  🕐{" "}
-                                  <span
-                                    className={
-                                      isSelected
-                                        ? "text-neutral-50"
-                                        : "text-neutral-700"
-                                    }
-                                  >
-                                    {walkingLabel}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <a
-                              href={p.mapUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="shrink-0"
-                            >
-                              <img
-                                src="/kakaomap_basic.png"
-                                alt="카카오맵에서 보기"
-                                className="h-10 w-10 rounded-lg"
-                              />
-                            </a>
-                          </div>
-                        </button>
+                          place={p}
+                          isSelected={isSelected}
+                          distanceLabel={distanceLabel}
+                          walkingLabel={walkingLabel}
+                          categoryLabel={displayCategory}
+                          onSelect={() => setSelectedId(p.id)}
+                          showReason={false}
+                        />
                       );
                     })}
                   </div>
@@ -449,42 +348,7 @@ export default function HomePage() {
       )}
 
       {/* ───────── 프러머 추천 탭 ───────── */}
-      {activeTab === "prommer" && (
-        <section className="mt-4 flex flex-1 flex-col gap-4 pb-10">
-          <div className="rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-600">
-            프럼 근처에서 자주 가거나 추천하고 싶은 곳들을 모아둔 리스트예요.
-          </div>
-
-          <div className="space-y-3">
-            {PROMMER_RECOMMENDATIONS.map((p) => (
-              <div
-                key={p.name}
-                className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-900"
-              >
-                <div className="space-y-1">
-                  <div className="text-[15px] font-semibold tracking-[-0.01em]">
-                    {p.name}
-                  </div>
-                  <div className="text-[11px] text-neutral-500">
-                    {p.description}
-                  </div>
-                  <div className="text-xs text-neutral-600">{p.address}</div>
-                  {p.distanceText && (
-                    <div className="text-[11px] text-neutral-500">
-                      {p.distanceText}
-                    </div>
-                  )}
-                  {p.note && (
-                    <div className="mt-1 text-[11px] text-neutral-600">
-                      {p.note}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {activeTab === "prommer" && <FrommerRecommendSection />}
 
       {/* 🔹 로딩 화면: 전체 화이트 배경 + 기존 로고 + 점 점점 늘어나는 메시지 */}
       {searchState === "loading" && (
@@ -500,5 +364,118 @@ export default function HomePage() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * ✅ 검색 결과 카드용 컴포넌트
+ */
+type RestaurantCardProps = {
+  place: Place;
+  isSelected?: boolean;
+  distanceLabel: string;
+  walkingLabel: string;
+  categoryLabel?: string;
+  onSelect?: () => void;
+  showReason?: boolean;
+  reasonText?: string | null;
+};
+
+export function RestaurantCard({
+  place,
+  isSelected = false,
+  distanceLabel,
+  walkingLabel,
+  categoryLabel,
+  onSelect,
+  showReason = false,
+  reasonText,
+}: RestaurantCardProps) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${
+        isSelected
+          ? "border-neutral-900 bg-neutral-900 text-white"
+          : "border-neutral-200 bg-white text-neutral-900 hover:border-neutral-400"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-1 text-[15px] font-semibold tracking-[-0.01em]">
+            <span>{place.name}</span>
+            {categoryLabel && (
+              <span
+                className={`text-[11px] font-normal ${
+                  isSelected ? "text-neutral-200" : "text-neutral-500"
+                }`}
+              >
+                · {categoryLabel}
+              </span>
+            )}
+          </div>
+
+          <div
+            className={`text-xs ${
+              isSelected ? "text-neutral-100/90" : "text-neutral-500"
+            }`}
+          >
+            {place.address}
+          </div>
+
+          <div className="mt-1 flex items-center gap-4 text-xs">
+            <div>
+              📍{" "}
+              <span
+                className={
+                  isSelected ? "text-neutral-50" : "text-neutral-700"
+                }
+              >
+                {distanceLabel}
+              </span>
+            </div>
+            <div>
+              🕐{" "}
+              <span
+                className={
+                  isSelected ? "text-neutral-50" : "text-neutral-700"
+                }
+              >
+                {walkingLabel}
+              </span>
+            </div>
+          </div>
+
+          {/* (현재는 검색 탭에서 showReason=false 로만 사용 중) */}
+          {showReason && reasonText && (
+            <div className="mt-2 text-xs">
+              <span
+                className={
+                  isSelected ? "text-neutral-50" : "text-neutral-700"
+                }
+              >
+                <span className="font-medium">프러머 추천 이유</span>{" "}
+                <span>“{reasonText}”</span>
+              </span>
+            </div>
+          )}
+        </div>
+
+        <a
+          href={place.mapUrl}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="shrink-0"
+        >
+          <img
+            src="/kakaomap_basic.png"
+            alt="카카오맵에서 보기"
+            className="h-8 w-8 rounded-lg"
+          />
+        </a>
+      </div>
+    </button>
   );
 }
