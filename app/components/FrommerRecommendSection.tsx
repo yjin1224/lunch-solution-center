@@ -272,7 +272,7 @@ export default function FrommerRecommendSection() {
       : DEFAULT_CENTER;
 
   return (
-    <section className="mt-4 flex flex-col gap-3 pb-10">
+    <section className="mt-4 flex flex-1 flex-col gap-3 pb-10">
       {/* 안내 카드 */}
       <div className="rounded-2xl border border-neutral-100 bg-neutral-50 px-4 py-3 text-xs text-neutral-700 relative">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -462,7 +462,10 @@ export default function FrommerRecommendSection() {
       </div>
 
       {/* 리스트 */}
-      <div className="space-y-3">
+      <div
+        className="space-y-3 overflow-y-auto pr-1"
+        style={{ maxHeight: "calc(100vh - 380px)" }}
+      >
         {sortedRecommendations.length === 0 && !loadingList ? (
           <p className="text-[11px] text-neutral-500">
             {hasFilter
@@ -472,9 +475,7 @@ export default function FrommerRecommendSection() {
         ) : (
           sortedRecommendations.map((r) => {
             const idStr = String(r.id);
-            const place = filteredMapPlaces.find(
-              (p) => p.id === idStr
-            );
+            const place = filteredMapPlaces.find((p) => p.id === idStr);
             const mapUrl = r.kakao_url || place?.mapUrl;
 
             return (
@@ -487,6 +488,7 @@ export default function FrommerRecommendSection() {
                 reason={r.reason}
                 categories={r.categories || []}
                 likes={r.likes ?? 0}
+                likedByMe={r.likedByMe}
                 isSelected={selectedId === idStr}
                 onClick={() => setSelectedId(idStr)}
                 onLike={() => handleLike(r)}
