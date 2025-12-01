@@ -14,7 +14,7 @@ type DbRecommendation = {
   categories: string[] | null;
   created_at: string;
   likes: number;
-  likedByMe?: boolean;
+  likedByMe?: boolean; // 프론트 전용 상태
 };
 
 // 태그: 팀회식 / 커피챗 제거
@@ -77,7 +77,7 @@ export default function FrommerRecommendSection() {
         const data: DbRecommendation[] = await res.json();
         if (!res.ok) throw new Error("리스트를 불러오지 못했어요.");
 
-        // 초기 likedByMe false로
+        // 초기 likedByMe false로 세팅 (프론트 전용)
         const withLikeState = data.map((d) => ({
           ...d,
           likedByMe: false,
@@ -203,26 +203,36 @@ export default function FrommerRecommendSection() {
     }
   };
 
-  // 좋아요 토글
+  /**
+   * ✅ 좋아요 토글 (서버에 +1 / -1 모두 반영)
+   * - likedByMe === false → delta = +1
+   * - likedByMe === true  → delta = -1
+   * 서버에서 COALESCE + GREATEST(0, ...)로 안전하게 처리
+   */
   const handleLike = async (item: DbRecommendation) => {
     const { id, likedByMe } = item;
+    const delta = likedByMe ? -1 : 1;
 
     try {
       const res = await fetch("/api/frommer-recommendations/like", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, toggle: true }),
+        body: JSON.stringify({ id, delta }),
       });
 
       const data = await res.json();
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.error("like failed:", data);
+        return;
+      }
 
+      // 서버에서 계산된 likes 기준으로 맞추고, likedByMe 토글
       setRecommendations((prev) =>
         prev.map((r) =>
           r.id === id
             ? {
                 ...r,
-                likes: data.likes,
+                likes: data.likes ?? r.likes,
                 likedByMe: !likedByMe,
               }
             : r
@@ -461,7 +471,7 @@ export default function FrommerRecommendSection() {
         </div>
       </div>
 
-      {/* 리스트 */}
+      {/* 리스트: 검색 탭과 동일한 스크롤 세팅 */}
       <div
         className="space-y-3 overflow-y-auto pr-1"
         style={{ maxHeight: "calc(100vh - 380px)" }}
@@ -475,7 +485,9 @@ export default function FrommerRecommendSection() {
         ) : (
           sortedRecommendations.map((r) => {
             const idStr = String(r.id);
-            const place = filteredMapPlaces.find((p) => p.id === idStr);
+            const place = filteredMapPlaces.find(
+              (p) => p.id === idStr
+            );
             const mapUrl = r.kakao_url || place?.mapUrl;
 
             return (
