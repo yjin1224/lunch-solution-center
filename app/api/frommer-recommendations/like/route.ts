@@ -4,6 +4,7 @@ import { sql } from "../../../lib/db";
 
 export async function POST(req: Request) {
   try {
+    // 👇 id와 delta 둘 다 받기
     const { id, delta } = await req.json();
 
     const idNum =
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // delta가 -1이면 감소, 아니면 기본 +1
+    // 👇 delta가 -1이면 감소, 그 외에는 +1
     const change = delta === -1 ? -1 : 1;
 
     const rows =
@@ -24,8 +25,15 @@ export async function POST(req: Request) {
         UPDATE recommendations
         SET likes = GREATEST(0, COALESCE(likes, 0) + ${change})
         WHERE id = ${idNum}
-        RETURNING id, name, address, reason, kakao_url, categories, created_at,
-                  COALESCE(likes, 0) AS likes
+        RETURNING
+          id,
+          name,
+          address,
+          reason,
+          kakao_url,
+          categories,
+          created_at,
+          COALESCE(likes, 0) AS likes
       `) as any[];
 
     if (!rows || rows.length === 0) {
