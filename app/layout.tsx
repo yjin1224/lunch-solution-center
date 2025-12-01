@@ -1,6 +1,7 @@
 // app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/react"; // 👈 추가
 
 export const metadata: Metadata = {
   title: "런치 솔루션 센터",
@@ -22,6 +23,7 @@ export default function RootLayout({
       </head>
       <body className="bg-white">
         {children}
+        <Analytics /> {/* 👈 Vercel Analytics 추가 */}
       </body>
     </html>
   );
