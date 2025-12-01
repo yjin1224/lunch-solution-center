@@ -173,7 +173,7 @@ export default function HomePage() {
         {/* 🔥 로고 클릭 → 초기화 */}
         <button onClick={resetToInitialState} className="block cursor-pointer">
           <img
-            src="/lunch_title.png"
+            src="/lunch_title.svg"
             alt="Lunch Solution Center"
             className="h-50 w-auto"
           />
@@ -347,7 +347,7 @@ export default function HomePage() {
       {searchState === "loading" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white">
           <div className="flex flex-col items-center gap-6">
-            <img src="/lunch_title.png" alt="Lunch Solution Center" className="h-40 w-auto" />
+            <img src="/lunch_title.svg" alt="Lunch Solution Center" className="h-40 w-auto" />
             <p className="text-sm text-neutral-700">{loadingMessageWithDots}</p>
           </div>
         </div>
